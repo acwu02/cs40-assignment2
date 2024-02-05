@@ -49,6 +49,10 @@ class ComputeStack(Stack):
         fargate_task_definition.add_container(
             f"{settings.PROJECT_NAME}-app-container",
             container_name=f"{settings.PROJECT_NAME}-app-container",
+            logging=ecs.AwsLogDriver(
+                stream_prefix=f"{settings.PROJECT_NAME}-fargate",
+                log_retention=logs.RetentionDays.ONE_WEEK,
+            ),
         )
 
         # FILLMEIN: Finish the Fargate service backend deployment
