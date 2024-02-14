@@ -27,6 +27,14 @@ class DataStack(Stack):
         self.aurora_db = rds.ServerlessCluster(
             self,
             f"{settings.PROJECT_NAME}-aurora-serverless",
+            engine=rds.DatabaseClusterEngine.aurora_postgres(version=rds.AuroraPostgresEngineVersion.VER_13_10),
+            vpc=props.network_vpc,
+            vpc_subnets=ec2.SubnetSelection(subnets=props.network_vpc.select_subnets(subnet_type=ec2.SubnetType.PRIVATE_ISOLATED).subnets),
+            default_database_name=settings.PROJECT_NAME,
+            credentials=rds.Credentials.from_generated_secret(
+                username=settings.PROJECT_NAME,
+                exclude_characters=settings.DB_SPECIAL_CHARS_EXCLUDE
+            )
         )
 
         # COMPLETED FOR YOU: S3 Buckets and Cloudfront CDN for images

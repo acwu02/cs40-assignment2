@@ -41,11 +41,29 @@ class ComputeStack(Stack):
         fargate_task_definition = ecs.FargateTaskDefinition(
             self,
             f"{settings.PROJECT_NAME}-fargate-task-definition",
+            cpu=512,
+            memory_limit_mib=2048,
+            runtime_platform=ecs.RuntimePlatform(
+                operating_system_family=ecs.OperatingSystemFamily.LINUX,
+                cpu_architecture = ecs.CpuArchitecture.ARM64
+            ),
+
         )
 
         # FILLMEIN: Grant the task definition's task role access to the database and signing key secrets, as well as the S3 buckets
+        app_secret_key.grant_write(fargate_task_definition.task_role)
+        props.data_s3_public_images.grant_read_write(fargate_task_definition.task_role)
+        props.data_s3_private_images.grant_read_write(fargate_task_definition.task_role)
 
         # FILLMEIN: Add a container to the Fargate task definition
+        secrets = {}
+        for secret_key, secret_placeholder in settings.DB_SECRET_MAPPING.items():
+            secrets[secret_key] = ecs.Secret.from_secrets_manager(
+                secret=props.data_aurora_db.secret,
+                field=secret_placeholder
+            )
+        secrets["SECRET_KEY"] = ecs.Secret.from_secrets_manager(app_secret_key)
+
         fargate_task_definition.add_container(
             f"{settings.PROJECT_NAME}-app-container",
             container_name=f"{settings.PROJECT_NAME}-app-container",
@@ -53,12 +71,36 @@ class ComputeStack(Stack):
                 stream_prefix=f"{settings.PROJECT_NAME}-fargate",
                 log_retention=logs.RetentionDays.ONE_WEEK,
             ),
+            image=ecs.ContainerImage.from_docker_image_asset(
+                ecr_assets.DockerImageAsset(
+                    self,
+                    "YoctogramBackend",
+                    directory=settings.YOCTOGRAM_APP_DIR
+                )    
+            ),
+            port_mappings=[ecs.PortMapping(container_port=80)],
+            environment={
+                "PRODUCTION": "true",
+                "DEBUG": "false",
+                "FORWARD_FACING_NAME": f"{settings.PROJECT_NAME}.{settings.SUNET}.{settings.COURSE_DNS_ROOT}",
+                "PUBLIC_IMAGES_BUCKET": f"{props.data_s3_public_images.bucket_name}",
+                "PRIVATE_IMAGES_BUCKET": f"{props.data_s3_private_images.bucket_name}",
+                "PUBLIC_IMAGES_CLOUDFRONT_DISTRIBUTION": f"{props.data_cloudfront_public_images.domain_name}",
+                "PRIVATE_IMAGES_CLOUDFRONT_DISTRIBUTION": f"{props.data_cloudfront_private_images.domain_name}",
+            },
+            secrets=secrets
         )
 
         # FILLMEIN: Finish the Fargate service backend deployment
         fargate_service = ecs_patterns.ApplicationLoadBalancedFargateService(
             self,
             f"{settings.PROJECT_NAME}-fargate-service",
+            domain_name=f"api.{settings.PROJECT_NAME}.{settings.SUNET}.{settings.COURSE_DNS_ROOT}",
+            certificate=props.network_backend_certificate,
+            redirect_http=True,
+            cluster=cluster,
+            domain_zone=props.network_hosted_zone,
+            task_definition=fargate_task_definition
         )
 
         # COMPLETED FOR YOU: Fargate service settings
@@ -91,7 +133,35 @@ class ComputeStack(Stack):
         frontend_distribution = cloudfront.Distribution(
             self,
             f"{settings.PROJECT_NAME}-frontend-distribution",
+            default_behavior=cloudfront.BehaviorOptions(
+                origin=cloudfront_origins.S3Origin(
+                    bucket=frontend_bucket,
+                    origin_access_identity=access_identity,
+                ),
+                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS
+            ),
+            default_root_object="index.html",
+            additional_behaviors={
+                "/api/*": cloudfront.BehaviorOptions(
+                    origin=cloudfront_origins.HttpOrigin(
+                        domain_name=f"api.{settings.PROJECT_NAME}.{settings.SUNET}.{settings.COURSE_DNS_ROOT}"
+                    ),
+                    viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                    origin_request_policy=cloudfront.OriginRequestPolicy.ALL_VIEWER_EXCEPT_HOST_HEADER,
+                    cache_policy=cloudfront.CachePolicy.CACHING_DISABLED
+                )
+            },
+            domain_names=[f"{settings.PROJECT_NAME}.{settings.SUNET}.{settings.COURSE_DNS_ROOT}"],
+            certificate=props.network_frontend_certificate,
+            error_responses=[
+                cloudfront.ErrorResponse(
+                    http_status=404,
+                    response_http_status=200,
+                    response_page_path="/index.html"
+                )
+            ]
         )
+
 
         # COMPLETED FOR YOU: DNS A record for Cloudfront frontend
         frontend_domain = r53.ARecord(
