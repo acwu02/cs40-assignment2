@@ -143,6 +143,7 @@ class ComputeStack(Stack):
             default_root_object="index.html",
             additional_behaviors={
                 "/api/*": cloudfront.BehaviorOptions(
+                    allowed_methods=cloudfront.AllowedMethods.ALLOW_ALL,
                     origin=cloudfront_origins.HttpOrigin(
                         domain_name=f"api.{settings.PROJECT_NAME}.{settings.SUNET}.{settings.COURSE_DNS_ROOT}"
                     ),
