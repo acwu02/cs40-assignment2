@@ -1,10 +1,14 @@
 from aws_cdk import (
+    Duration,
     Stack,
     aws_cloudfront as cloudfront,
     aws_ec2 as ec2,
+    aws_lambda as lambda_,
+    aws_lambda_event_sources as lambda_event_sources,
     aws_rds as rds,
     aws_s3 as s3,
 )
+
 from aws_solutions_constructs import aws_cloudfront_s3 as cfs3
 from constructs import Construct
 
@@ -91,3 +95,22 @@ class DataStack(Stack):
         self.cloudfront_private_images = (
             cloudfront_s3_private.cloud_front_web_distribution
         )
+
+        lambda_fn = lambda_.DockerImageFunction(self, "Function",
+            code=lambda_.DockerImageCode.from_image_asset("../compression"),
+            architecture=lambda_.Architecture.ARM_64,
+            timeout=Duration.seconds(30),
+            memory_size=1536
+        )
+    
+        lambda_fn.add_event_source(lambda_event_sources.S3EventSource(self.s3_public_images,
+            events=[s3.EventType.OBJECT_CREATED_POST]
+            )
+        )
+        lambda_fn.add_event_source(lambda_event_sources.S3EventSource(self.s3_private_images,
+            events=[s3.EventType.OBJECT_CREATED_POST]
+            )
+        )
+
+        self.s3_public_images.grant_read_write(lambda_fn)
+        self.s3_private_images.grant_read_write(lambda_fn)

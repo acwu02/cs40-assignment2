@@ -1,5 +1,7 @@
+import json
 from aws_cdk import (
     Stack,
+    Duration,
     aws_cloudfront as cloudfront,
     aws_cloudfront_origins as cloudfront_origins,
     aws_ec2 as ec2,
@@ -37,6 +39,13 @@ class ComputeStack(Stack):
             description="Yoctogram App JWT Signing Key",
         )
 
+        # DATADOG API KEY
+        datadog_api_key = secretsmanager.Secret(
+            self,
+            f"{settings.PROJECT_NAME}-datadog-api-key",
+            description="Datadog API Key",
+        )
+
         # FILLMEIN: Fargate task definition
         fargate_task_definition = ecs.FargateTaskDefinition(
             self,
@@ -54,6 +63,9 @@ class ComputeStack(Stack):
         app_secret_key.grant_write(fargate_task_definition.task_role)
         props.data_s3_public_images.grant_read_write(fargate_task_definition.task_role)
         props.data_s3_private_images.grant_read_write(fargate_task_definition.task_role)
+
+        # Granting task definition access to Datadog API key
+        datadog_api_key.grant_write(fargate_task_definition.task_role)
 
         # FILLMEIN: Add a container to the Fargate task definition
         secrets = {}
@@ -88,7 +100,48 @@ class ComputeStack(Stack):
                 "PUBLIC_IMAGES_CLOUDFRONT_DISTRIBUTION": f"{props.data_cloudfront_public_images.domain_name}",
                 "PRIVATE_IMAGES_CLOUDFRONT_DISTRIBUTION": f"{props.data_cloudfront_private_images.domain_name}",
             },
-            secrets=secrets
+            secrets=secrets,
+            docker_labels={
+                "com.datadoghq.ad.instances": '[{"host": "%%host%%", "port": 80}]',
+                "com.datadoghq.ad.check_names": '["yoctogram-ecs"]',
+                "com.datadoghq.ad.init_configs": "[{}]",
+            }
+        )
+
+        # DATADOG SIDECAR CONTAINER
+        datadog_secrets = {}
+        datadog_secrets["DD_API_KEY"] = ecs.Secret.from_secrets_manager(datadog_api_key)
+
+        fargate_task_definition.add_container(
+            f"{settings.PROJECT_NAME}-datadog-sidecar-container",
+            image=ecs.ContainerImage.from_registry("public.ecr.aws/datadog/agent:latest"),
+            environment={
+                "ECS_FARGATE": "true",
+                "ECS_FARGATE_METRICS": "true",
+                "DD_SITE": "us5.datadoghq.com",
+                "DD_APM_ENABLED": "true",
+                "DD_PROFILING_ENABLED": "true",
+                "DD_APM_NON_LOCAL_TRAFFIC": "true"
+            },
+            secrets=datadog_secrets,
+            logging=ecs.AwsLogDriver(
+                stream_prefix=f"{settings.PROJECT_NAME}-fargate",
+                log_retention=logs.RetentionDays.ONE_WEEK,
+            ),
+            health_check=ecs.HealthCheck(
+                command=["CMD-SHELL", "agent health"],
+                retries=3,
+                timeout=Duration.seconds(5),
+                interval=Duration.seconds(30),
+                start_period=Duration.seconds(15)
+            ),
+            port_mappings=[
+                ecs.PortMapping(
+                    container_port=8126,
+                    host_port=8126
+                )
+            ],
+
         )
 
         # FILLMEIN: Finish the Fargate service backend deployment
