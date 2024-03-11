@@ -49,9 +49,9 @@ jobs:
         file: Dockerfile
         platforms: linux/arm64
         push: false
-        tags: 
-          - user/app:latest
-          - user/app:${{ steps.timestamp.outputs.timestamp }}
+        tags: |
+          ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:latest
+          ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ steps.timestamp.outputs.timestamp }}
 
     # FILLMEIN: Remove the latest tag from all existing images
     - name: 7 Remove latest Tag From Old latest
@@ -66,14 +66,14 @@ jobs:
         platforms: linux/arm64
         push: true
         tags: |
-          - user/app:latest
-          - user/app:${{ steps.timestamp.outputs.timestamp }}
+          ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:latest
+          ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ steps.timestamp.outputs.timestamp }}
 
     # FILLMEIN: populate the correct values for cluster name and service
     # This is a hack for the purposes of this assignment. Don't do this in production.
     - name: 9 Force a Fargate Redeploy
-      run: aws ecs update-service
-        --cluster yoctogram-compute-stack-yoctogramcluster2BA83DB9-5z0UIibwNoEj
-        --service yoctogramcomputestackyoctogramfargatetaskdefinition1B751195
-        --force-new-deployment 
+      run: aws ecs update-service \
+        --cluster yoctogram-compute-stack-yoctogramcluster2BA83DB9-5z0UIibwNoEj \
+        --service yoctogramcomputestackyoctogramfargatetaskdefinition1B751195 \
+        --force-new-deployment  \
         --region us-west-2
