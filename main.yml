@@ -1,0 +1,79 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+
+permissions: write-all
+
+env:
+  AWS_REGION: us-west-2
+  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-west-2.amazonaws.com
+  ECR_REPOSITORY: cs40
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+
+    steps:
+    # COMPLETED FOR YOU
+    - name: 1 Retrieve Timestamp
+      id: timestamp
+      run: echo "::set-output name=timestamp::$(date +%s%3N)"
+
+    # COMPLETED FOR YOU
+    - name: 2 Checkout code
+      uses: actions/checkout@v2
+
+    # FILLMEIN: replace ROLE_NAME_HERE with the name of the role you defined in CDK
+    - name: 3 Configure AWS credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: arn:aws:iam::${{ secrets.AWS_ACCOUNT_ID }}:role/CS40Assignment2
+        aws-region: us-west-2
+
+    # COMPLETED FOR YOU
+    - name: 4 Login to Amazon ECR
+      id: login-ecr
+      uses: aws-actions/amazon-ecr-login@v1
+
+    # COMPLETED FOR YOU
+    - name: 5 Set up Docker Buildx
+      uses: docker/setup-buildx-action@v1
+
+    # FILLMEIN: configure the action to build the docker image but *NOT* push it to ECR
+    - name: 6 Build Docker images
+      uses: docker/build-push-action@v2
+      with:
+        context: .
+        file: Dockerfile
+        platforms: linux/arm64
+        push: false
+        tags: 
+          - user/app:latest
+          - user/app:${{ steps.timestamp.outputs.timestamp }}
+
+    # FILLMEIN: Remove the latest tag from all existing images
+    - name: 7 Remove latest Tag From Old latest
+      run: COMMAND_HERE
+
+    # FILLMEIN: Push to ECR
+    - name: 8 Push Docker images
+      uses: docker/build-push-action@v2
+      with:
+        context: .
+        file: Dockerfile
+        platforms: linux/arm64
+        push: true
+        tags: |
+          - user/app:latest
+          - user/app:${{ steps.timestamp.outputs.timestamp }}
+
+    # FILLMEIN: populate the correct values for cluster name and service
+    # This is a hack for the purposes of this assignment. Don't do this in production.
+    - name: 9 Force a Fargate Redeploy
+      run: aws ecs update-service
+        --cluster yoctogram-compute-stack-yoctogramcluster2BA83DB9-5z0UIibwNoEj
+        --service yoctogramcomputestackyoctogramfargatetaskdefinition1B751195
+        --force-new-deployment 
+        --region us-west-2
