@@ -15,6 +15,8 @@ from aws_cdk import (
     aws_s3 as s3,
     aws_s3_deployment as s3_deployment,
     aws_secretsmanager as secretsmanager,
+    aws_ecr as ecr,
+    aws_iam as iam
 )
 from constructs import Construct
 
@@ -76,6 +78,12 @@ class ComputeStack(Stack):
             )
         secrets["SECRET_KEY"] = ecs.Secret.from_secrets_manager(app_secret_key)
 
+        repository = ecr.Repository.from_repository_name(
+            self,
+            "Repository",
+            repository_name="cs40:latest"
+        )
+
         fargate_task_definition.add_container(
             f"{settings.PROJECT_NAME}-app-container",
             container_name=f"{settings.PROJECT_NAME}-app-container",
@@ -83,12 +91,16 @@ class ComputeStack(Stack):
                 stream_prefix=f"{settings.PROJECT_NAME}-fargate",
                 log_retention=logs.RetentionDays.ONE_WEEK,
             ),
-            image=ecs.ContainerImage.from_docker_image_asset(
-                ecr_assets.DockerImageAsset(
-                    self,
-                    "YoctogramBackend",
-                    directory=settings.YOCTOGRAM_APP_DIR
-                )    
+            #image=ecs.ContainerImage.from_docker_image_asset(
+            #    ecr_assets.DockerImageAsset(
+            #        self,
+            #        "YoctogramBackend",
+            #        directory=settings.YOCTOGRAM_APP_DIR
+            #    )    
+            #),
+            image=ecs.ContainerImage.from_ecr_repository(
+                repository,
+                "latest"
             ),
             port_mappings=[ecs.PortMapping(container_port=80)],
             environment={
@@ -226,4 +238,30 @@ class ComputeStack(Stack):
             target=r53.RecordTarget.from_alias(
                 r53_targets.CloudFrontTarget(frontend_distribution)
             ),
+        )
+
+        gh_actions_provider = iam.OpenIdConnectProvider(
+            self,
+            f"{settings.PROJECT_NAME}-gh-actions-provider",
+            url="https://token.actions.githubusercontent.com",
+            client_ids=["sts.amazonaws.com"],
+        )
+
+        role = iam.Role(
+            self,
+            "Role",
+            assumed_by=iam.WebIdentityPrincipal(
+                gh_actions_provider.open_id_connect_provider_arn,
+                conditions={
+                    "StringLike": {
+                         "token.actions.githubusercontent.com:sub": "repo:acwu02/yoctogram-app:ref:refs/heads/main",
+                        "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+                    }
+                }
+            ),
+            managed_policies=[
+                iam.ManagedPolicy.from_aws_managed_policy_name("AmazonEC2ContainerRegistryFullAccess"),
+                iam.ManagedPolicy.from_aws_managed_policy_name("AmazonECS_FullAccess")
+            ],
+            max_session_duration=Duration.hours(1)
         )
