@@ -55,7 +55,7 @@ jobs:
 
     # FILLMEIN: Remove the latest tag from all existing images
     - name: 7 Remove latest Tag From Old latest
-      run: COMMAND_HERE
+      run: aws ecr batch-delete-image --repository-name $ECR_REPOSITORY --image-ids imageTag=latest --region $AWS_REGION
 
     # FILLMEIN: Push to ECR
     - name: 8 Push Docker images
